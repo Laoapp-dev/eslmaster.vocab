@@ -4,6 +4,7 @@ import { RotateCcw, Clock, Zap, Puzzle, Lock } from 'lucide-react';
 import { useApp } from '@/App';
 import type { CEFRLevel } from '@/types/vocabulary';
 import { getMasteryPct, isLevelUnlocked, getPretestLevel, UNLOCK_PCT, randomSessionSize, pickDiverseSample } from '@/lib/levelLock';
+import { saveSession, loadSession, clearSession } from '@/lib/sessionResume';
 
 // Total *cards* per game (each word contributes 2 cards: word + definition),
 // so this yields 5-10 word pairs per session.
@@ -17,6 +18,20 @@ interface GameCard {
   pairId: string;
   isFlipped: boolean;
   isMatched: boolean;
+}
+
+// Resume snapshot key (see src/lib/sessionResume.ts). The game board is
+// small, fully self-contained, serializable data (no live word lookups
+// needed), so the whole card set is stored directly. `flippedCards` is
+// deliberately NOT restored — any pair mid-flip when a reload happens is
+// reset to face-down (matched cards stay matched), which is simpler and
+// safer than trying to resume a half-finished in-flight comparison.
+const MATCHING_SESSION_KEY = 'moe_matching_active_session';
+interface MatchingSessionSnapshot {
+  cards: GameCard[];
+  moves: number;
+  timer: number;
+  selectedLevel: CEFRLevel | 'all';
 }
 
 export function Matching() {
@@ -41,8 +56,38 @@ export function Matching() {
       sessionStorage.removeItem('moe_study_filter');
       sessionStorage.removeItem('moe_study_level');
       sessionStorage.removeItem('moe_study_category');
+      clearSession(MATCHING_SESSION_KEY);
     };
   }, []);
+
+  // Resume an in-progress game after a reload.
+  const [restoredMatching, setRestoredMatching] = useState(false);
+  useEffect(() => {
+    if (restoredMatching) return;
+    setRestoredMatching(true);
+    const snap = loadSession<MatchingSessionSnapshot>(MATCHING_SESSION_KEY);
+    if (!snap || !snap.cards?.length) return;
+    // Any card still mid-flip (unmatched, face-up) when the reload happened
+    // is reset face-down — see note above.
+    const restoredCards = snap.cards.map(c => c.isMatched ? c : { ...c, isFlipped: false });
+    if (restoredCards.every(c => c.isMatched)) return; // already finished — nothing to resume
+    setCards(restoredCards);
+    setFlippedCards([]);
+    setMoves(snap.moves);
+    setTimer(snap.timer);
+    setSelectedLevel(snap.selectedLevel);
+    setIsPlaying(true);
+    setGameComplete(false);
+    setShowSetup(false);
+  }, [restoredMatching]);
+
+  // Keep the resume snapshot current while a game is in progress.
+  useEffect(() => {
+    if (showSetup || gameComplete || cards.length === 0) return;
+    saveSession<MatchingSessionSnapshot>(MATCHING_SESSION_KEY, {
+      cards, moves, timer, selectedLevel,
+    });
+  }, [showSetup, gameComplete, cards, moves, timer, selectedLevel]);
 
   // Level-journey / favorites / category session filter (see Categories.tsx)
   const _ssFilter = sessionStorage.getItem('moe_study_filter');
@@ -100,11 +145,12 @@ export function Matching() {
     setGameComplete(false);
     setStars(0);
     setShowSetup(false);
+    clearSession(MATCHING_SESSION_KEY); // starting fresh replaces any stale resume snapshot
   };
 
   // Timer
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (isPlaying && !gameComplete) {
       interval = setInterval(() => setTimer(prev => prev + 1), 1000);
     }
@@ -161,6 +207,7 @@ export function Matching() {
     if (cards.length > 0 && cards.every(c => c.isMatched) && !gameComplete) {
       setGameComplete(true);
       setIsPlaying(false);
+      clearSession(MATCHING_SESSION_KEY);
 
       // Calculate stars
       const minMoves = cards.length / 2; // Perfect game

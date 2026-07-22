@@ -10,6 +10,18 @@ import { useSpeech } from '@/hooks/useSpeech';
 import type { VocabularyWord, CEFRLevel } from '@/types/vocabulary';
 import { CEFR_ORDER, UNLOCK_PCT, getMasteryPct, isLevelUnlocked, getPretestLevel } from '@/lib/levelLock';
 import { POS_COLORS, CEFR_STYLE, DiffDots, StarButton } from '@/components/FlashcardVisuals';
+import { saveSession, loadSession, clearSession } from '@/lib/sessionResume';
+
+// Key for the in-progress-session resume snapshot (see src/lib/sessionResume.ts).
+// Only the word IDs + position are stored — the actual word data is always
+// re-read live from `vocabulary.words` on restore, so it can never go stale.
+const FLASH_SESSION_KEY = 'moe_flash_active_session';
+interface FlashSessionSnapshot {
+  queueIds: string[];
+  currentIndex: number;
+  sessionStats: { mastered: number; review: number };
+  selectedLevel: CEFRLevel | 'all';
+}
 
 // Visual tokens (POS_COLORS, CEFR_STYLE, DIFF_STYLE, DiffDots, StarButton)
 // live in src/components/FlashcardVisuals.tsx — imported above — so they
@@ -47,18 +59,54 @@ export function Flashcards() {
   const [queue, setQueue]                 = useState<VocabularyWord[]>([]);
   const [showSetup, setShowSetup]         = useState(true);
   const [direction, setDirection]         = useState<'left'|'right'|null>(null);
+  const [restoredSession, setRestoredSession] = useState(false);
 
   // The filter set by Favorites / Level Journey / Categories is meant for
   // this one visit only. Clear it on unmount so navigating away and later
   // clicking "Flashcards" directly from the sidebar doesn't silently
   // inherit a stale filter from a completely unrelated earlier session.
+  // The active-session resume snapshot is cleared here too — this cleanup
+  // only runs on a real in-app navigation away (a hard page reload destroys
+  // the JS context before it ever gets to run), so a reload mid-session
+  // still resumes, while deliberately leaving the page starts fresh.
   useEffect(() => {
     return () => {
       sessionStorage.removeItem('moe_study_filter');
       sessionStorage.removeItem('moe_study_level');
       sessionStorage.removeItem('moe_study_category');
+      clearSession(FLASH_SESSION_KEY);
     };
   }, []);
+
+  // Resume an in-progress session after a reload, once the word list has
+  // actually loaded (vocabulary.words is empty for an instant on first
+  // paint while the curriculum JSON is being fetched).
+  useEffect(() => {
+    if (restoredSession || vocabulary.words.length === 0) return;
+    setRestoredSession(true);
+    const snap = loadSession<FlashSessionSnapshot>(FLASH_SESSION_KEY);
+    if (!snap || !snap.queueIds?.length) return;
+    const byId = new Map(vocabulary.words.map(w => [w.id, w]));
+    const rebuiltQueue = snap.queueIds.map(id => byId.get(id)).filter((w): w is VocabularyWord => !!w);
+    if (rebuiltQueue.length === 0) return; // words no longer exist — nothing to resume
+    setQueue(rebuiltQueue);
+    setCurrentIndex(Math.min(snap.currentIndex, rebuiltQueue.length - 1));
+    setSessionStats(snap.sessionStats ?? { mastered: 0, review: 0 });
+    setSelectedLevel(snap.selectedLevel ?? 'all');
+    setShowSetup(false);
+  }, [vocabulary.words, restoredSession]);
+
+  // Keep the resume snapshot up to date while a session is active. Skipped
+  // during setup/completion since there's nothing in-progress to resume.
+  useEffect(() => {
+    if (showSetup || sessionComplete || queue.length === 0) return;
+    saveSession<FlashSessionSnapshot>(FLASH_SESSION_KEY, {
+      queueIds: queue.map(w => w.id),
+      currentIndex,
+      sessionStats,
+      selectedLevel,
+    });
+  }, [showSetup, sessionComplete, queue, currentIndex, sessionStats, selectedLevel]);
 
   // Words for the current level selection (respects session filter)
   const levelWords: VocabularyWord[] = ssFilter === 'favorites'
@@ -91,6 +139,7 @@ export function Flashcards() {
     setDirection(null);
     setShowSetup(false);
     isAdvancingRef.current = false;
+    clearSession(FLASH_SESSION_KEY); // starting fresh replaces any stale resume snapshot
   };
 
   const handleFlip = useCallback(() => setIsFlipped(p => !p), []);
@@ -131,6 +180,7 @@ export function Flashcards() {
       }, 220);
     } else {
       setSessionComplete(true);
+      clearSession(FLASH_SESSION_KEY);
       isAdvancingRef.current = false;
     }
   }, [queue, currentIndex, vocabulary]);

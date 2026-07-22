@@ -5,9 +5,25 @@ import { useApp } from '@/App';
 import { useSpeech } from '@/hooks/useSpeech';
 import type { VocabularyWord, CEFRLevel } from '@/types/vocabulary';
 import { getMasteryPct, isLevelUnlocked, getPretestLevel, UNLOCK_PCT, randomSessionSize, pickDiverseSample } from '@/lib/levelLock';
+import { saveSession, loadSession, clearSession } from '@/lib/sessionResume';
 
 const MIN_WORDS = 10;
 const MAX_WORDS = 20;
+
+// Resume snapshot key (see src/lib/sessionResume.ts). Only IDs + the current
+// word's id/checked-state are stored; the actual word data is always
+// re-read live from vocabulary.words on restore.
+const SPELLING_SESSION_KEY = 'moe_spelling_active_session';
+interface SpellingSessionSnapshot {
+  queueIds: string[];
+  totalAnswered: number;
+  correctCount: number;
+  streak: number;
+  selectedLevel: CEFRLevel | 'all';
+  currentWordId: string | null;
+  isChecked: boolean;
+  isCorrect: boolean;
+}
 
 export function Spelling() {
   const { vocabulary, addToast } = useApp();
@@ -42,9 +58,46 @@ export function Spelling() {
       sessionStorage.removeItem('moe_study_filter');
       sessionStorage.removeItem('moe_study_level');
       sessionStorage.removeItem('moe_study_category');
+      clearSession(SPELLING_SESSION_KEY);
     };
   }, []);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Resume an in-progress session after a reload, once the word list has
+  // loaded (vocabulary.words is empty for an instant on first paint).
+  const [restoredSpelling, setRestoredSpelling] = useState(false);
+  useEffect(() => {
+    if (restoredSpelling || vocabulary.words.length === 0) return;
+    setRestoredSpelling(true);
+    const snap = loadSession<SpellingSessionSnapshot>(SPELLING_SESSION_KEY);
+    if (!snap || !snap.queueIds?.length) return;
+    const byId = new Map(vocabulary.words.map(w => [w.id, w]));
+    const rebuiltQueue = snap.queueIds.map(id => byId.get(id)).filter((w): w is VocabularyWord => !!w);
+    if (rebuiltQueue.length === 0) return;
+    const restoredWord = (snap.currentWordId && byId.get(snap.currentWordId))
+      || rebuiltQueue[Math.min(snap.totalAnswered, rebuiltQueue.length - 1)];
+    setSessionQueue(rebuiltQueue);
+    setTotalAnswered(snap.totalAnswered);
+    setCorrectCount(snap.correctCount);
+    setStreak(snap.streak);
+    setSelectedLevel(snap.selectedLevel);
+    setCurrentWord(restoredWord ?? null);
+    setIsChecked(snap.isChecked);
+    setIsCorrect(snap.isCorrect);
+    setUserInput('');
+    setShowSetup(false);
+  }, [vocabulary.words, restoredSpelling]);
+
+  // Keep the resume snapshot current while a session is active.
+  useEffect(() => {
+    if (showSetup || sessionComplete || sessionQueue.length === 0) return;
+    saveSession<SpellingSessionSnapshot>(SPELLING_SESSION_KEY, {
+      queueIds: sessionQueue.map(w => w.id),
+      totalAnswered, correctCount, streak, selectedLevel,
+      currentWordId: currentWord?.id ?? null,
+      isChecked, isCorrect,
+    });
+  }, [showSetup, sessionComplete, sessionQueue, totalAnswered, correctCount, streak, selectedLevel, currentWord, isChecked, isCorrect]);
 
   // Level-journey / favorites / category session filter (see Categories.tsx)
   const _ssFilter = sessionStorage.getItem('moe_study_filter');
@@ -91,6 +144,7 @@ export function Spelling() {
     setCorrectCount(0);
     setSessionComplete(false);
     setShowSetup(false);
+    clearSession(SPELLING_SESSION_KEY); // starting fresh replaces any stale resume snapshot
     showWordAt(queue, 0);
   };
 
@@ -130,6 +184,7 @@ export function Spelling() {
   const handleNext = () => {
     if (totalAnswered >= sessionQueue.length) {
       setSessionComplete(true);
+      clearSession(SPELLING_SESSION_KEY);
 
       // Save session
       vocabulary.addSession({

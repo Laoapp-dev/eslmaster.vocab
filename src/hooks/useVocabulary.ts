@@ -107,7 +107,7 @@ export function useVocabulary(dataKeyPrefix?: string) {
   // nothing is fetched from a network service:
   //
   //   • baseWords    — the full 9,000+ word ESL curriculum, shipped as
-  //                     src/data/defaultVocabulary.json directly inside the
+  //                     public/data/vocabulary.json directly inside the
   //                     app's code. Loaded straight into memory on mount
   //                     (its own separate JS chunk, fetched only after first
   //                     paint so it never blocks initial render). It is
@@ -141,19 +141,29 @@ export function useVocabulary(dataKeyPrefix?: string) {
   const [baseLoaded, setBaseLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    import('@/data/defaultVocabulary.json').then((mod) => {
-      if (cancelled) return;
-      const raw = (mod as { default?: unknown }).default ?? mod;
-      if (Array.isArray(raw)) {
-        const withIds = raw.map((w: any, i: number) => ({ ...w, id: `base-${i}` }));
-        setBaseWords(sanitizeWords(withIds));
-      }
-      setBaseLoaded(true);
-    }).catch(() => {
-      // Base curriculum chunk failed to load — non-fatal, app still works
-      // with any manually-added words.
-      setBaseLoaded(true);
-    });
+    // Fetched as a plain static JSON file (public/data/vocabulary.json)
+    // rather than imported as a JS module. This keeps the curriculum out
+    // of the JS bundle entirely — no minification cost, no impact on the
+    // service worker's precache size limit, and it scales cleanly as the
+    // word list grows into the tens of thousands.
+    fetch(`${import.meta.env.BASE_URL}data/vocabulary.json`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`vocabulary.json ${res.status}`);
+        return res.json();
+      })
+      .then((raw) => {
+        if (cancelled) return;
+        if (Array.isArray(raw)) {
+          const withIds = raw.map((w: any, i: number) => ({ ...w, id: `base-${i}` }));
+          setBaseWords(sanitizeWords(withIds));
+        }
+        setBaseLoaded(true);
+      })
+      .catch(() => {
+        // Base curriculum failed to load — non-fatal, app still works
+        // with any manually-added words.
+        setBaseLoaded(true);
+      });
     return () => { cancelled = true; };
   }, []);
 
