@@ -176,7 +176,7 @@ export function hasGeminiKey(): boolean {
  *
  * Builds a short mini-lesson + multiple-choice quiz from a batch of words
  * out of the app's built-in 9,000+ word database (see useVocabulary.ts /
- * src/data/defaultVocabulary.json). Uses the same admin-configured Gemini
+ * public/data/vocabulary.json). Uses the same admin-configured Gemini
  * key as writing/speaking evaluation above. Always works even with no key
  * set — it falls back to building the quiz directly from the words' own
  * definitions/synonyms/antonyms, just without the AI-written intro blurb.

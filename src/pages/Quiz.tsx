@@ -5,9 +5,28 @@ import { useApp } from '@/App';
 import { useSpeech } from '@/hooks/useSpeech';
 import type { CEFRLevel, QuizType, QuizQuestion } from '@/types/vocabulary';
 import { getMasteryPct, isLevelUnlocked, getPretestLevel, UNLOCK_PCT, randomSessionSize, pickDiverseSample } from '@/lib/levelLock';
+import { saveSession, loadSession, clearSession } from '@/lib/sessionResume';
 
 const MIN_QUESTIONS = 10;
 const MAX_QUESTIONS = 20;
+
+// Resume snapshot key (see src/lib/sessionResume.ts). Unlike Flashcards, the
+// whole generated question set (including its randomized answer options) is
+// stored directly — questions are cheap, fully-serializable data, and
+// regenerating them from scratch on reload would show different questions
+// with different shuffled options than the ones the learner was mid-way
+// through, which would be more confusing than just not resuming at all.
+const QUIZ_SESSION_KEY = 'moe_quiz_active_session';
+interface QuizSessionSnapshot {
+  questions: QuizQuestion[];
+  currentQuestionIndex: number;
+  selectedAnswer: string | null;
+  showExplanation: boolean;
+  score: number;
+  sessionStartTime: number;
+  selectedLevel: CEFRLevel | 'all';
+  quizType: QuizType;
+}
 
 export function Quiz() {
   const { vocabulary } = useApp();
@@ -33,8 +52,36 @@ export function Quiz() {
       sessionStorage.removeItem('moe_study_filter');
       sessionStorage.removeItem('moe_study_level');
       sessionStorage.removeItem('moe_study_category');
+      clearSession(QUIZ_SESSION_KEY);
     };
   }, []);
+
+  // Resume an in-progress quiz after a reload (see QUIZ_SESSION_KEY above).
+  const [restoredQuiz, setRestoredQuiz] = useState(false);
+  useEffect(() => {
+    if (restoredQuiz) return;
+    setRestoredQuiz(true);
+    const snap = loadSession<QuizSessionSnapshot>(QUIZ_SESSION_KEY);
+    if (!snap || !snap.questions?.length) return;
+    setQuestions(snap.questions);
+    setCurrentQuestionIndex(Math.min(snap.currentQuestionIndex, snap.questions.length - 1));
+    setSelectedAnswer(snap.selectedAnswer);
+    setShowExplanation(snap.showExplanation);
+    setScore(snap.score);
+    setSessionStartTime(snap.sessionStartTime);
+    setSelectedLevel(snap.selectedLevel);
+    setQuizType(snap.quizType);
+    setShowSetup(false);
+  }, [restoredQuiz]);
+
+  // Keep the resume snapshot current while a quiz is in progress.
+  useEffect(() => {
+    if (showSetup || quizComplete || questions.length === 0) return;
+    saveSession<QuizSessionSnapshot>(QUIZ_SESSION_KEY, {
+      questions, currentQuestionIndex, selectedAnswer, showExplanation,
+      score, sessionStartTime, selectedLevel, quizType,
+    });
+  }, [showSetup, quizComplete, questions, currentQuestionIndex, selectedAnswer, showExplanation, score, sessionStartTime, selectedLevel, quizType]);
 
   // Level-journey / favorites / category session filter (see Categories.tsx)
   const _ssFilter = sessionStorage.getItem('moe_study_filter');
@@ -120,6 +167,7 @@ export function Quiz() {
     setQuizComplete(false);
     setSessionStartTime(Date.now());
     setShowSetup(false);
+    clearSession(QUIZ_SESSION_KEY); // starting fresh replaces any stale resume snapshot
   }, [words, quizType, vocabulary.words]);
 
   const handleAnswer = (answer: string) => {
@@ -160,6 +208,7 @@ export function Quiz() {
       setShowExplanation(false);
     } else {
       setQuizComplete(true);
+      clearSession(QUIZ_SESSION_KEY);
 
       // Save session. `score` already reflects the just-answered final
       // question (handleAnswer updates it before this button is clickable),
