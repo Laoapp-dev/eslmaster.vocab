@@ -95,14 +95,6 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // The default 9,000+ word curriculum (src/data/defaultVocabulary.json)
-        // compiles into a single ~2.5 MB JS chunk. Workbox's default
-        // precache limit is 2 MiB, so without raising it here `vite build`
-        // throws ("Configure workbox.maximumFileSizeToCacheInBytes...") and
-        // the GitHub Actions build step fails outright — which is why no
-        // new deploy was ever reaching GitHub Pages. Raised to 5 MB to give
-        // headroom as the word list grows.
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         // CRITICAL: vite-plugin-pwa silently defaults navigateFallback to
         // 'index.html' unless told otherwise. That generates its own
         // NavigationRoute bound to the precached index.html, registered
@@ -118,12 +110,35 @@ export default defineConfig({
         // navigate-request runtimeCaching rule below instead, which fetches
         // fresh HTML from the network whenever a network is available.
         globPatterns: ['**/*.{js,css,ico,png,svg,woff,woff2,ttf,eot}'],
+        // Safety margin above the default 2 MiB — the app bundle itself is
+        // small now that the vocabulary curriculum lives in a separate
+        // static JSON file (see the runtimeCaching rule for
+        // /data/vocabulary.json below) rather than being bundled into JS,
+        // but this gives headroom if any single chunk grows.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // Clean up old cache on activation
         cleanupOutdatedCaches: true,
         // Client claim immediately
         clientsClaim: true,
         skipWaiting: true,
         runtimeCaching: [
+          {
+            // The vocabulary curriculum (public/data/vocabulary.json) is a
+            // static JSON file, not JS, so it's outside globPatterns above
+            // and is never part of the install-time precache — a multi-MB
+            // precache entry is exactly what caused the build to fail
+            // (workbox's 2 MiB precache limit) and what makes first boot
+            // slow on mobile. Instead it's fetched normally on first use
+            // and cached here so every visit after that (including
+            // offline) is instant.
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.endsWith('/data/vocabulary.json'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'vocabulary-data',
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // Matches the actual page navigation (opening/reloading the app).
             // NetworkFirst = always try the network first, with a short
