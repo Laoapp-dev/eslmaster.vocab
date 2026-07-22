@@ -6,6 +6,7 @@ import { useAuth, AuthProvider } from '@/hooks/useAuth';
 import { Sidebar } from '@/components/Sidebar';
 import { MobileNav } from '@/components/MobileNav';
 import { ToastContainer } from '@/components/ToastContainer';
+import { AuthPage } from '@/pages/AuthPage';
 
 // ── Lazy-loaded pages ────────────────────────────────────────────────────────
 // Every page below is its own separate JS chunk, loaded on demand instead of
@@ -67,7 +68,7 @@ function AppInner() {
   // ── Everything lives on this device ──────────────────────────────────────
   // No GitHub sync, no Google Sheet sync, no CSV/JSON import, no network
   // calls at all for vocabulary data. The full 9,000+ word curriculum
-  // (public/data/vocabulary.json) is bundled straight into the app —
+  // (src/data/defaultVocabulary.json) is bundled straight into the app —
   // see the `baseWords` load effect in useVocabulary.ts — and each
   // learner's own words/progress are kept in this browser's localStorage
   // only, under their own account key.
@@ -80,9 +81,7 @@ function AppInner() {
     );
   }
 
-  // No login screen: this is a local-only, single-profile app (see
-  // useAuth.tsx), so isAuthenticated is always true past this point.
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated) return <AuthPage />;
 
   return (
     <AppContext.Provider value={{ vocabulary, addToast }}>
