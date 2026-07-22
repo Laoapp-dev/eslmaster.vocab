@@ -164,16 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     ensureAdminExists();
-    let user = getSessionUser();
-    if (!user) {
-      // No login screen — this app has no accounts/server, everything is
-      // local to this device, so there is nothing a login gate actually
-      // protects. Automatically sign in to the single local profile
-      // stored on this device instead of asking the person to log in.
-      const users = loadUsers();
-      user = users.find(u => u.role === 'admin') || users[0] || null;
-      if (user) sessionStorage.setItem(AUTH_SESSION_KEY, user.id);
-    }
+    const user = getSessionUser();
     if (user) setCurrentUser(user);
     setIsLoading(false);
 
