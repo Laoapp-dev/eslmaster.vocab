@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <!-- PWA / install metadata -->
-    <meta name="theme-color" content="#F5A623" />
+    <meta name="theme-color" content="#1A1A2E" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -105,6 +105,19 @@
           var root = document.getElementById('root');
           // If React ever mounted anything, #root has children — don't show.
           if (root && root.children.length > 0) return;
+
+          // Nothing rendered after 6s and no specific resource-load error or
+          // rejected dynamic import was caught above (those already trigger
+          // an immediate recovery on their own). This is the catch-all: any
+          // OTHER cause of a hung boot — a stale/broken cached service
+          // worker response, a script that loaded but silently hung, etc —
+          // still deserves the SAME one-shot automatic recovery attempt
+          // rather than making the person figure out and tap the button
+          // themselves. The sessionStorage guard inside
+          // clearCachesAndReload() already caps this to once per tab
+          // session, so this can't loop.
+          if (clearCachesAndReload()) return;
+
           var overlay = document.createElement('div');
           overlay.setAttribute('id', 'esl-boot-fallback');
           overlay.style.cssText = 'position:fixed;inset:0;background:#1A1A2E;color:#fff;' +
