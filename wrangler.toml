@@ -5,7 +5,7 @@
 # directly in the dashboard instead (Cloudflare auto-detects the Vite
 # framework preset — build command `npm run build`, output dir `dist`) —
 # pick ONE of the two setup methods, not both, to avoid duplicate deploys.
-# Full setup: see the "Deploying" section in README.md.
+# See CLOUDFLARE_DEPLOY.md for the full setup guide.
 
 name = "esl-master-vocab"
 # ⚠️ If you already deployed a Cloudflare Pages project under the OLD name
